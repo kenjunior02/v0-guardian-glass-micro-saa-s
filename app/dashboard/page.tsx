@@ -45,19 +45,37 @@ type Guard = {
 }
 
 export default function SupervisorDashboard() {
+  const [user, setUser] = useState<any>(null)
   const [activeTab, setActiveTab] = useState("live")
   const [patrols, setPatrols] = useState<Patrol[]>([])
   const [guards, setGuards] = useState<Guard[]>([])
   const [loading, setLoading] = useState(true)
 
-  const companyId = 1 // Demo company ID
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const res = await fetch("/api/auth/me")
+        const data = await res.json()
+        if (data.user && (data.user.role === "supervisor" || data.user.role === "admin")) {
+          setUser(data.user)
+        } else {
+          window.location.href = "/login"
+        }
+      } catch (error) {
+        window.location.href = "/login"
+      }
+    }
+    checkAuth()
+  }, [])
 
   useEffect(() => {
+    if (!user) return
+
     const fetchData = async () => {
       try {
         const [patrolsRes, guardsRes] = await Promise.all([
-          fetch(`/api/patrols/history?company_id=${companyId}&limit=10`),
-          fetch(`/api/guards/list?company_id=${companyId}`),
+          fetch(`/api/patrols/history?company_id=${user.company_id}&limit=10`),
+          fetch(`/api/guards/list?company_id=${user.company_id}`),
         ])
 
         const patrolsData = await patrolsRes.json()
@@ -81,7 +99,7 @@ export default function SupervisorDashboard() {
 
     const interval = setInterval(fetchData, 10000)
     return () => clearInterval(interval)
-  }, [companyId])
+  }, [user])
 
   const timeAgo = (timestamp: string) => {
     const seconds = Math.floor((Date.now() - new Date(timestamp).getTime()) / 1000)
@@ -89,6 +107,11 @@ export default function SupervisorDashboard() {
     if (seconds < 3600) return `${Math.floor(seconds / 60)}min`
     if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`
     return `${Math.floor(seconds / 86400)}d`
+  }
+
+  const handleLogout = async () => {
+    await fetch("/api/auth/logout", { method: "POST" })
+    window.location.href = "/login"
   }
 
   return (
@@ -140,8 +163,10 @@ export default function SupervisorDashboard() {
               <AvatarFallback>AD</AvatarFallback>
             </Avatar>
             <div className="flex-1 overflow-hidden">
-              <p className="text-xs font-bold truncate">SegurMatola Lda</p>
-              <p className="text-[10px] text-muted-foreground truncate">Supervisor Admin</p>
+              <p className="text-xs font-bold truncate">{user?.name || "Supervisor"}</p>
+              <Button variant="link" className="p-0 h-auto text-[10px] text-destructive" onClick={handleLogout}>
+                Sair
+              </Button>
             </div>
           </div>
         </div>

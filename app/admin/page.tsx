@@ -1,8 +1,7 @@
 "use client"
 
 import { cn } from "@/lib/utils"
-
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import {
   Shield,
   LayoutDashboard,
@@ -26,7 +25,41 @@ import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 
 export default function AdminDashboard() {
+  const [user, setUser] = useState<any>(null)
+  const [payments, setPayments] = useState<any[]>([])
   const [activeTab, setActiveTab] = useState("global")
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const init = async () => {
+      try {
+        const authRes = await fetch("/api/auth/me")
+        const authData = await authRes.json()
+
+        if (authData.user && authData.user.role === "admin") {
+          setUser(authData.user)
+
+          const paymentsRes = await fetch("/api/mpesa/history")
+          const paymentsData = await paymentsRes.json()
+          if (paymentsData.success) {
+            setPayments(paymentsData.payments)
+          }
+        } else {
+          window.location.href = "/login"
+        }
+      } catch (error) {
+        console.error("[v0] Admin init error:", error)
+      } finally {
+        setLoading(false)
+      }
+    }
+    init()
+  }, [])
+
+  const handleLogout = async () => {
+    await fetch("/api/auth/logout", { method: "POST" })
+    window.location.href = "/login"
+  }
 
   return (
     <div className="flex h-screen bg-muted/30">
@@ -64,14 +97,14 @@ export default function AdminDashboard() {
           ))}
         </nav>
         <div className="p-6 mt-auto">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 cursor-pointer" onClick={handleLogout}>
             <Avatar className="h-9 w-9 border border-primary/20">
               <AvatarImage src="/avatar-super-admin.jpg" />
               <AvatarFallback>SA</AvatarFallback>
             </Avatar>
             <div className="overflow-hidden">
-              <p className="text-xs font-bold truncate">Super Admin</p>
-              <p className="text-[10px] text-muted-foreground truncate">guardian.admin@gg.mz</p>
+              <p className="text-xs font-bold truncate">{user?.name || "Super Admin"}</p>
+              <p className="text-[10px] text-muted-foreground truncate">Sair do sistema</p>
             </div>
           </div>
         </div>
@@ -189,70 +222,55 @@ export default function AdminDashboard() {
                       </tr>
                     </thead>
                     <tbody className="divide-y">
-                      {[
-                        {
-                          name: "SegurMatola Lda",
-                          ref: "84 123 4567",
-                          plan: "PRO",
-                          value: "4.500 MZN",
-                          status: "Pendente",
-                        },
-                        {
-                          name: "Zambézia Security",
-                          ref: "82 987 6543",
-                          plan: "Enterprise",
-                          value: "15.000 MZN",
-                          status: "Confirmado",
-                        },
-                        {
-                          name: "Limpeza & Cia",
-                          ref: "84 444 5555",
-                          plan: "Básico",
-                          value: "1.500 MZN",
-                          status: "Confirmado",
-                        },
-                        {
-                          name: "Condomínio Jasmim",
-                          ref: "87 111 2222",
-                          plan: "PRO",
-                          value: "4.500 MZN",
-                          status: "Pendente",
-                        },
-                      ].map((item, i) => (
-                        <tr key={i} className="hover:bg-muted/30 transition-colors">
-                          <td className="p-4">
-                            <p className="text-sm font-bold">{item.name}</p>
-                          </td>
-                          <td className="p-4">
-                            <p className="text-xs font-mono">{item.ref}</p>
-                          </td>
-                          <td className="p-4">
-                            <Badge variant="outline" className="text-[10px] font-bold h-5 uppercase">
-                              {item.plan}
-                            </Badge>
-                          </td>
-                          <td className="p-4">
-                            <p className="text-sm font-bold">{item.value}</p>
-                          </td>
-                          <td className="p-4">
-                            <Badge
-                              className={cn(
-                                "text-[10px] font-bold border-none",
-                                item.status === "Pendente"
-                                  ? "bg-orange-500/10 text-orange-500"
-                                  : "bg-success/10 text-success",
-                              )}
-                            >
-                              {item.status}
-                            </Badge>
-                          </td>
-                          <td className="p-4 text-right">
-                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0 rounded-lg">
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
+                      {loading ? (
+                        <tr>
+                          <td colSpan={6} className="p-8 text-center text-xs text-muted-foreground italic">
+                            Carregando pagamentos...
                           </td>
                         </tr>
-                      ))}
+                      ) : payments.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="p-8 text-center text-xs text-muted-foreground italic">
+                            Nenhum pagamento registrado.
+                          </td>
+                        </tr>
+                      ) : (
+                        payments.map((payment) => (
+                          <tr key={payment.id} className="hover:bg-muted/30 transition-colors">
+                            <td className="p-4">
+                              <p className="text-sm font-bold">Empresa #{payment.company_id.slice(0, 8)}</p>
+                            </td>
+                            <td className="p-4">
+                              <p className="text-xs font-mono">{payment.reference}</p>
+                            </td>
+                            <td className="p-4">
+                              <Badge variant="outline" className="text-[10px] font-bold h-5 uppercase">
+                                PRO
+                              </Badge>
+                            </td>
+                            <td className="p-4">
+                              <p className="text-sm font-bold">{payment.amount} MZN</p>
+                            </td>
+                            <td className="p-4">
+                              <Badge
+                                className={cn(
+                                  "text-[10px] font-bold border-none uppercase",
+                                  payment.status === "pending"
+                                    ? "bg-orange-500/10 text-orange-500"
+                                    : "bg-success/10 text-success",
+                                )}
+                              >
+                                {payment.status}
+                              </Badge>
+                            </td>
+                            <td className="p-4 text-right">
+                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0 rounded-lg">
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
                 </div>

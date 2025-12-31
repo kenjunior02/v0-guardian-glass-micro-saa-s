@@ -23,20 +23,20 @@ import { Card, CardContent } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 
 export default function GuardPWA() {
-  const [guardId] = useState(1) // Demo: user_id from database
-  const [guardInternalId] = useState(1) // Demo: guard table id
-  const [companyId] = useState(1) // Demo: company_id
+  const [user, setUser] = useState<any>(null)
   const [activeTab, setActiveTab] = useState("ronda")
   const [isPatrolling, setIsPatrolling] = useState(false)
-  const [bluetoothDevice, setBluetoothDevice] = useState<any | null>(null) // allow any for device object
+  const [bluetoothDevice, setBluetoothDevice] = useState<any | null>(null)
   const [isConnecting, setIsConnecting] = useState(false)
   const [batteryLevel, setBatteryLevel] = useState<number | null>(null)
-  const deviceRef = useRef<any>(null) // guardamos a referência do objeto real do dispositivo para reconexão
+  const deviceRef = useRef<any>(null)
   const [currentPatrolId, setCurrentPatrolId] = useState<number | null>(null)
   const [timer, setTimer] = useState(0)
   const [isListening, setIsListening] = useState(false)
   const [lastTranscription, setLastTranscription] = useState("")
   const [aiAnalysis, setAiAnalysis] = useState("Aguardando voz...")
+  const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null)
+  const watchIdRef = useRef<number | null>(null)
 
   // Timer logic for patrol
   useEffect(() => {
@@ -50,34 +50,65 @@ export default function GuardPWA() {
   }, [isPatrolling])
 
   useEffect(() => {
-    const checkActivePatrol = async () => {
+    const fetchUser = async () => {
       try {
-        const res = await fetch(`/api/patrols/active?guard_id=${guardId}`)
+        const res = await fetch("/api/auth/me")
         const data = await res.json()
-        if (data.success && data.patrol) {
-          setCurrentPatrolId(data.patrol.id)
-          setIsPatrolling(true)
-          const startedAt = new Date(data.patrol.started_at)
-          const elapsed = Math.floor((Date.now() - startedAt.getTime()) / 1000)
-          setTimer(elapsed)
+        if (data.user) {
+          setUser(data.user)
+          checkActivePatrol(data.user.id)
+        } else {
+          window.location.href = "/login"
         }
       } catch (error) {
-        console.error("[v0] Failed to check active patrol:", error)
+        console.error("[v0] Failed to fetch user:", error)
       }
     }
-    checkActivePatrol()
-  }, [guardId])
+    fetchUser()
 
-  const formatTime = (seconds: number) => {
-    const h = Math.floor(seconds / 3600)
-    const m = Math.floor((seconds % 3600) / 60)
-    const s = seconds % 60
-    return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`
+    return () => {
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current)
+      }
+    }
+  }, [])
+
+  const checkActivePatrol = async (userId: number) => {
+    try {
+      const res = await fetch(`/api/patrols/active?guard_id=${userId}`)
+      const data = await res.json()
+      if (data.success && data.patrol) {
+        setCurrentPatrolId(data.patrol.id)
+        setIsPatrolling(true)
+        const startedAt = new Date(data.patrol.started_at)
+        const elapsed = Math.floor((Date.now() - startedAt.getTime()) / 1000)
+        setTimer(elapsed)
+        startTracking()
+      }
+    } catch (error) {
+      console.error("[v0] Failed to check active patrol:", error)
+    }
+  }
+
+  const startTracking = () => {
+    if ("geolocation" in navigator) {
+      watchIdRef.current = navigator.geolocation.watchPosition(
+        (position) => {
+          const { latitude, longitude } = position.coords
+          setLocation({ lat: latitude, lng: longitude })
+          console.log("[v0] Location updated:", latitude, longitude)
+          // In a real app, we'd sync this to the server via WebSocket or interval API
+        },
+        (error) => console.error("[v0] Geolocation error:", error),
+        { enableHighAccuracy: true, maximumAge: 10000, timeout: 5000 },
+      )
+    }
   }
 
   const togglePatrol = async () => {
+    if (!user) return
+
     if (isPatrolling) {
-      // Stop patrol
       if (currentPatrolId) {
         try {
           const res = await fetch("/api/patrols/stop", {
@@ -85,45 +116,53 @@ export default function GuardPWA() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               patrol_id: currentPatrolId,
-              sentiment_score: 0.78,
-              ai_risk_score: 0.25,
+              sentiment_score: 0.8,
+              ai_risk_score: 0.1,
             }),
           })
           const data = await res.json()
           if (data.success) {
-            console.log("[v0] Patrol stopped and saved to DB")
             setIsPatrolling(false)
             setCurrentPatrolId(null)
             setTimer(0)
+            if (watchIdRef.current !== null) {
+              navigator.geolocation.clearWatch(watchIdRef.current)
+            }
           }
         } catch (error) {
           console.error("[v0] Failed to stop patrol:", error)
         }
       }
     } else {
-      // Start patrol
       try {
         const res = await fetch("/api/patrols/start", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            guard_id: guardInternalId,
-            company_id: companyId,
-            location: "Casa Silva",
-            latitude: -25.9655,
-            longitude: 32.5832,
+            guard_id: user.guard_id || user.id,
+            company_id: user.company_id,
+            location: "Local Atual",
+            latitude: location?.lat || -25.9655,
+            longitude: location?.lng || 32.5832,
           }),
         })
         const data = await res.json()
         if (data.success) {
-          console.log("[v0] Patrol started:", data.patrol)
           setCurrentPatrolId(data.patrol.id)
           setIsPatrolling(true)
+          startTracking()
         }
       } catch (error) {
         console.error("[v0] Failed to start patrol:", error)
       }
     }
+  }
+
+  const formatTime = (seconds: number) => {
+    const h = Math.floor(seconds / 3600)
+    const m = Math.floor((seconds % 3600) / 60)
+    const s = seconds % 60
+    return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`
   }
 
   // Web Speech API Integration
@@ -164,7 +203,7 @@ export default function GuardPWA() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             patrol_id: currentPatrolId,
-            guard_id: guardInternalId,
+            guard_id: user.guard_id || user.id,
             transcript: text,
             sentiment_score: isRisk ? 0.3 : 0.8,
             keywords: text.split(" ").slice(0, 5),
@@ -269,18 +308,38 @@ export default function GuardPWA() {
 
     try {
       setIsConnecting(true)
-      console.log("[v0] Solicitando permissão para novo dispositivo...")
+      const availability = await navigator.bluetooth.getAvailability()
+      if (!availability) {
+        console.warn("[v0] Bluetooth is not available on this device.")
+      }
 
       const device = await navigator.bluetooth.requestDevice({
         acceptAllDevices: true,
-        optionalServices: ["battery_service", "device_information", "generic_access", "heart_rate"],
+        optionalServices: ["battery_service", "device_information", "generic_access"],
       })
 
       device.addEventListener("gattserverdisconnected", onDisconnected)
       await setupDevice(device)
+
+      // Persist connection to DB
+      if (user) {
+        await fetch("/api/bluetooth/connect", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_id: user.id,
+            device_id: device.id,
+            device_name: device.name || "Guardian Glass",
+          }),
+        })
+      }
     } catch (error) {
-      console.error("[v0] Erro na conexão Bluetooth:", error)
-      if (error instanceof Error && error.name !== "NotFoundError") {
+      console.error("[v0] Bluetooth Error:", error)
+      if (error instanceof Error && error.message.includes("permissions policy")) {
+        alert(
+          "O Bluetooth está bloqueado pela política de permissões do navegador neste ambiente. Em produção (HTTPS), isso funcionará normalmente.",
+        )
+      } else if (error instanceof Error && error.name !== "NotFoundError") {
         alert(`Erro: ${error.message}`)
       }
     } finally {
@@ -298,30 +357,33 @@ export default function GuardPWA() {
   }
 
   const handleSOS = async () => {
+    if (!user) return
     try {
       const res = await fetch("/api/sos/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           patrol_id: currentPatrolId,
-          guard_id: guardInternalId,
-          company_id: companyId,
-          location: "Casa Silva - SOS",
-          latitude: -25.9655,
-          longitude: 32.5832,
-          severity: "critical",
-          description: "SOS acionado pelo guarda",
+          guard_id: user.guard_id || user.id,
+          company_id: user.company_id,
+          location: "Alerta SOS",
+          latitude: location?.lat || -25.9655,
+          longitude: location?.lng || 32.5832,
+          description: "Emergência acionada pelo guarda",
         }),
       })
       const data = await res.json()
       if (data.success) {
-        console.log("[v0] SOS saved to DB:", data.sos)
         alert("🚨 SOS ENVIADO! Supervisores foram notificados.")
       }
     } catch (error) {
-      console.error("[v0] Failed to send SOS:", error)
-      alert("Erro ao enviar SOS. Tente novamente.")
+      console.error("[v0] SOS Error:", error)
     }
+  }
+
+  const handleLogout = async () => {
+    await fetch("/api/auth/logout", { method: "POST" })
+    window.location.href = "/login"
   }
 
   return (
@@ -330,11 +392,13 @@ export default function GuardPWA() {
       <header className="p-4 glass sticky top-0 z-50 flex items-center justify-between border-b">
         <div className="flex items-center gap-2">
           <Badge variant="outline" className="text-[10px] bg-primary/10 text-primary border-primary/20">
-            <MapPin className="w-3 h-3 mr-1" /> Casa Silva
+            <MapPin className="w-3 h-3 mr-1" /> {isPatrolling ? "Patrulha Ativa" : "Standby"}
           </Badge>
           <div className="flex items-center gap-1">
-            <div className="w-2 h-2 rounded-full bg-success animate-pulse" />
-            <span className="text-[10px] font-bold text-success">ONLINE</span>
+            <div className={cn("w-2 h-2 rounded-full animate-pulse", user ? "bg-success" : "bg-muted")} />
+            <span className={cn("text-[10px] font-bold", user ? "text-success" : "text-muted-foreground")}>
+              {user ? "ONLINE" : "OFFLINE"}
+            </span>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -530,13 +594,13 @@ export default function GuardPWA() {
         {activeTab === "eu" && (
           <div className="p-4 space-y-6 animate-in fade-in slide-in-from-bottom-2">
             <div className="flex items-center gap-4">
-              <div className="w-16 h-16 rounded-full bg-muted border-2 border-primary overflow-hidden">
-                <img src="/security-guard-face.jpg" alt="Guard" />
+              <div className="w-16 h-16 rounded-full bg-muted border-2 border-primary overflow-hidden flex items-center justify-center">
+                <User className="w-8 h-8 text-primary/40" />
               </div>
               <div>
-                <h2 className="font-bold text-lg">João Silva</h2>
-                <Badge variant="outline" className="text-orange-500 border-orange-500/30">
-                  Trial: 12/14 dias
+                <h2 className="font-bold text-lg">{user?.name || "Carregando..."}</h2>
+                <Badge variant="outline" className="text-orange-500 border-orange-500/30 capitalize">
+                  {user?.role || "..."}
                 </Badge>
               </div>
             </div>
@@ -587,6 +651,7 @@ export default function GuardPWA() {
             <Button
               variant="outline"
               className="w-full text-destructive border-destructive/20 hover:bg-destructive/5 bg-transparent"
+              onClick={handleLogout}
             >
               Sair da Conta
             </Button>

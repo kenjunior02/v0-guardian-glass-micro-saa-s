@@ -1,14 +1,12 @@
 "use client"
 
 import { cn } from "@/lib/utils"
-
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import {
   Shield,
   Brain,
   MessageSquare,
   FileText,
-  Download,
   Play,
   AlertCircle,
   Clock,
@@ -24,7 +22,45 @@ import { Progress } from "@/components/ui/progress"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 
 export default function ClientPortal() {
-  const [activeReport, setActiveReport] = useState(null)
+  const [user, setUser] = useState<any>(null)
+  const [reports, setReports] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const init = async () => {
+      try {
+        const authRes = await fetch("/api/auth/me")
+        const authData = await authRes.json()
+
+        if (authData.user && authData.user.role === "client") {
+          setUser(authData.user)
+
+          const reportsRes = await fetch(`/api/patrols/history?company_id=${authData.user.company_id}&limit=5`)
+          const reportsData = await reportsRes.json()
+          if (reportsData.success) {
+            setReports(reportsData.patrols)
+          }
+        } else {
+          window.location.href = "/login"
+        }
+      } catch (error) {
+        console.error("[v0] Client portal init error:", error)
+      } finally {
+        setLoading(false)
+      }
+    }
+    init()
+  }, [])
+
+  const handleShareWhatsApp = (report: any) => {
+    const message = `GuardianGlass: Relatório de Ronda - ${new Date(report.started_at).toLocaleDateString()}\nStatus: ${report.status}\nLocal: ${report.location}\nAnálise IA: Ronda estável.`
+    window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, "_blank")
+  }
+
+  const handleLogout = async () => {
+    await fetch("/api/auth/logout", { method: "POST" })
+    window.location.href = "/login"
+  }
 
   return (
     <div className="min-h-screen bg-muted/30">
@@ -43,7 +79,7 @@ export default function ClientPortal() {
             <Zap className="w-3 h-3" />
             <span className="text-[10px] font-bold uppercase tracking-wider">AI Guard Ativo</span>
           </div>
-          <Avatar className="h-8 w-8 border border-primary/20">
+          <Avatar className="h-8 w-8 border border-primary/20 cursor-pointer" onClick={handleLogout}>
             <AvatarImage src="/avatar-client.jpg" />
             <AvatarFallback>CS</AvatarFallback>
           </Avatar>
@@ -54,15 +90,18 @@ export default function ClientPortal() {
         {/* Welcome Section */}
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div className="space-y-1">
-            <h1 className="text-3xl font-bold tracking-tight">Sr. Silva 👋</h1>
+            <h1 className="text-3xl font-bold tracking-tight">{user?.name || "Cliente"} 👋</h1>
             <p className="text-muted-foreground">
               Bem-vindo ao resumo de segurança da{" "}
-              <span className="text-foreground font-semibold underline decoration-primary/30">Casa Silva</span>.
+              <span className="text-foreground font-semibold underline decoration-primary/30">
+                {user?.company_name || "Sua Empresa"}
+              </span>
+              .
             </p>
           </div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Calendar className="w-4 h-4" />
-            <span>Dezembro, 2025</span>
+            <span>{new Date().toLocaleDateString("pt-BR", { month: "long", year: "numeric" })}</span>
           </div>
         </div>
 
@@ -147,56 +186,61 @@ export default function ClientPortal() {
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {[
-                      { date: "29/12/2025", coverage: "92%", status: "OK", summary: "Ronda estável, sem anomalias" },
-                      { date: "28/12/2025", coverage: "87%", status: "SOS", summary: "SOS acionado 22:15, resolvido" },
-                      { date: "27/12/2025", coverage: "95%", status: "OK", summary: "Performance máxima atingida" },
-                      {
-                        date: "26/12/2025",
-                        coverage: "91%",
-                        status: "AVISO",
-                        summary: "Guarda saiu da geofence por 5min",
-                      },
-                    ].map((report, i) => (
-                      <tr key={i} className="hover:bg-muted/30 transition-colors group">
-                        <td className="p-4 text-sm font-medium">{report.date}</td>
-                        <td className="p-4">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-bold">{report.coverage}</span>
-                            <div className="w-12 h-1 bg-muted rounded-full overflow-hidden hidden sm:block">
-                              <div className="h-full bg-primary" style={{ width: report.coverage }} />
-                            </div>
-                          </div>
-                        </td>
-                        <td className="p-4">
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              "text-[10px] font-bold border-none",
-                              report.status === "SOS"
-                                ? "bg-destructive/10 text-destructive"
-                                : report.status === "AVISO"
-                                  ? "bg-warning/10 text-warning"
-                                  : "bg-success/10 text-success",
-                            )}
-                          >
-                            {report.status}
-                          </Badge>
-                        </td>
-                        <td className="p-4 text-xs text-muted-foreground max-w-[200px] truncate italic">
-                          "{report.summary}"
-                        </td>
-                        <td className="p-4 text-right">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0 rounded-lg group-hover:bg-primary/10 group-hover:text-primary transition-all"
-                          >
-                            <Download className="h-4 w-4" />
-                          </Button>
+                    {loading ? (
+                      <tr>
+                        <td colSpan={5} className="p-8 text-center text-xs text-muted-foreground italic">
+                          Carregando relatórios...
                         </td>
                       </tr>
-                    ))}
+                    ) : reports.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="p-8 text-center text-xs text-muted-foreground italic">
+                          Nenhum relatório encontrado.
+                        </td>
+                      </tr>
+                    ) : (
+                      reports.map((report, i) => (
+                        <tr key={report.id} className="hover:bg-muted/30 transition-colors group">
+                          <td className="p-4 text-sm font-medium">
+                            {new Date(report.started_at).toLocaleDateString()}
+                          </td>
+                          <td className="p-4">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-bold">92%</span>
+                              <div className="w-12 h-1 bg-muted rounded-full overflow-hidden hidden sm:block">
+                                <div className="h-full bg-primary" style={{ width: "92%" }} />
+                              </div>
+                            </div>
+                          </td>
+                          <td className="p-4">
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                "text-[10px] font-bold border-none uppercase",
+                                report.status === "sos"
+                                  ? "bg-destructive/10 text-destructive"
+                                  : "bg-success/10 text-success",
+                              )}
+                            >
+                              {report.status}
+                            </Badge>
+                          </td>
+                          <td className="p-4 text-xs text-muted-foreground max-w-[200px] truncate italic">
+                            "{report.location}"
+                          </td>
+                          <td className="p-4 text-right">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0 rounded-lg group-hover:bg-primary/10 group-hover:text-primary transition-all"
+                              onClick={() => handleShareWhatsApp(report)}
+                            >
+                              <MessageSquare className="h-4 w-4" />
+                            </Button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
